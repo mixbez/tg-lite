@@ -9,8 +9,10 @@ import {
   passwordHint,
   persistSession,
   saveCreds,
+  resendCode,
   sendCode,
   signIn,
+  type CodeInfo,
   type Creds,
 } from "./tg";
 
@@ -25,7 +27,7 @@ export function Login({ onReady }: { onReady: (c: TelegramClient) => void }) {
   const [creds, setCreds] = useState<Creds | null>(null);
   const [client, setClient] = useState<TelegramClient | null>(null);
   const [phone, setPhone] = useState("");
-  const [codeHash, setCodeHash] = useState("");
+  const [code, setCode] = useState<CodeInfo | null>(null);
   const [hint, setHint] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -94,14 +96,15 @@ export function Login({ onReady }: { onReady: (c: TelegramClient) => void }) {
     if (step === "phone") {
       return run(async () => {
         const p = v("phone").replace(/[^\d+]/g, "");
-        setCodeHash(await sendCode(client, creds, p));
+        setCode(await sendCode(client, creds, p));
         setPhone(p);
         setStep("code");
       });
     }
     if (step === "code") {
       return run(async () => {
-        if ((await signIn(client, phone, codeHash, v("code"))) === "password") {
+        if (!code) return;
+        if ((await signIn(client, phone, code.hash, v("code"))) === "password") {
           setHint(await passwordHint(client).catch(() => ""));
           setStep("password");
           return;
@@ -149,7 +152,11 @@ export function Login({ onReady }: { onReady: (c: TelegramClient) => void }) {
         )}
         {step === "code" && (
           <>
-            <p className="muted">Код пришёл в Telegram на {phone}</p>
+            <p className="muted">
+              Код для +{phone.replace(/^\+/, "")}
+              <br />
+              {code?.where}
+            </p>
             <input name="code" inputMode="numeric" placeholder="Код" autoComplete="one-time-code" autoFocus required />
           </>
         )}
@@ -163,6 +170,16 @@ export function Login({ onReady }: { onReady: (c: TelegramClient) => void }) {
         <button type="submit" disabled={busy}>
           {busy ? "…" : "Далее"}
         </button>
+        {step === "code" && code?.canResend && client && (
+          <button
+            type="button"
+            className="link"
+            disabled={busy}
+            onClick={() => void run(async () => setCode(await resendCode(client, phone, code.hash)))}
+          >
+            Отправить код другим способом
+          </button>
+        )}
         {step !== "creds" && (
           <button
             type="button"

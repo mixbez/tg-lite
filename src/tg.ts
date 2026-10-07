@@ -74,9 +74,51 @@ export function errorText(e: unknown): string {
   return msg;
 }
 
+export interface CodeInfo {
+  hash: string;
+  /** Where Telegram delivered the code, as told by auth.SentCode.type. */
+  where: string;
+  canResend: boolean;
+}
+
+function describeSentCode(sent: Api.auth.TypeSentCode): CodeInfo {
+  if (!(sent instanceof Api.auth.SentCode)) throw new Error("Неожиданный ответ Telegram: " + sent.className);
+  const t = sent.type;
+  let where: string;
+  if (t instanceof Api.auth.SentCodeTypeApp) {
+    where = "Сообщением в официальном приложении Telegram: служебный чат «Telegram» на устройстве, где вы уже вошли";
+  } else if (
+    t instanceof Api.auth.SentCodeTypeSms ||
+    t instanceof Api.auth.SentCodeTypeSmsWord ||
+    t instanceof Api.auth.SentCodeTypeSmsPhrase
+  ) {
+    where = "По SMS";
+  } else if (t instanceof Api.auth.SentCodeTypeCall) {
+    where = "Звонком: код продиктуют";
+  } else if (t instanceof Api.auth.SentCodeTypeFlashCall || t instanceof Api.auth.SentCodeTypeMissedCall) {
+    where = "Звонком: код — последние цифры входящего номера";
+  } else if (t instanceof Api.auth.SentCodeTypeEmailCode) {
+    where = `На почту ${t.emailPattern}`;
+  } else if (t instanceof Api.auth.SentCodeTypeFragmentSms) {
+    where = `Через Fragment: ${t.url}`;
+  } else if (t instanceof Api.auth.SentCodeTypeSetUpEmailRequired) {
+    throw new Error("Telegram требует сначала привязать почту для входа (login email) в официальном приложении");
+  } else {
+    where = `Способ доставки: ${t.className}`;
+  }
+  return { hash: sent.phoneCodeHash, where, canResend: !!sent.nextType };
+}
+
 export async function sendCode(client: TelegramClient, c: Creds, phone: string) {
-  const { phoneCodeHash } = await client.sendCode({ apiId: c.apiId, apiHash: c.apiHash }, phone);
-  return phoneCodeHash;
+  return describeSentCode(
+    await client.invoke(
+      new Api.auth.SendCode({ phoneNumber: phone, apiId: c.apiId, apiHash: c.apiHash, settings: new Api.CodeSettings({}) }),
+    ),
+  );
+}
+
+export async function resendCode(client: TelegramClient, phone: string, hash: string) {
+  return describeSentCode(await client.invoke(new Api.auth.ResendCode({ phoneNumber: phone, phoneCodeHash: hash })));
 }
 
 /** Returns "ok", or "password" when the account has 2FA enabled. */
